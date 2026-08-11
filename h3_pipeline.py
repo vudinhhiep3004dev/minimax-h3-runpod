@@ -48,8 +48,7 @@ _WORKFLOW_ALIASES = {
 RESOLUTION_PRESETS: dict[str, dict[str, int]] = {
     # All multiples of 32; 9:16 vertical
     "draft": {"width": 544, "height": 960},
-    # Near-9:16 0.88 MP. Exact 720x1280 is invalid because 720 is not /32.
-    "720p": {"width": 704, "height": 1248},
+    "720p": {"width": 720, "height": 1280},
     "native": {"width": 768, "height": 1344},
 }
 
@@ -57,7 +56,7 @@ ASPECT_SIZES: dict[str, dict[str, dict[str, int]]] = {
     "9:16": RESOLUTION_PRESETS,
     "16:9": {
         "draft": {"width": 960, "height": 544},
-        "720p": {"width": 1248, "height": 704},
+        "720p": {"width": 1280, "height": 720},
         "native": {"width": 1344, "height": 768},
     },
     "1:1": {

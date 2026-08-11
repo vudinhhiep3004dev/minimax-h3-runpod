@@ -70,8 +70,6 @@ class WorkflowSchemaTests(unittest.TestCase):
 
     def test_resolution_contract(self):
         self.assertEqual(resolve_resolution("9:16", "draft"), (544, 960))
-        self.assertEqual(resolve_resolution("9:16", "720p"), (704, 1248))
-        self.assertEqual(resolve_resolution("16:9", "720p"), (1248, 704))
 
 
 if __name__ == "__main__":

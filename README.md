@@ -72,7 +72,7 @@ python -u handler.py  # picks up test_input.json when RUNPOD_LOCAL_TEST patterns
 | `duration` | no | 4–15s; snapped to H3 `17n+5` frames @ 24fps |
 | `aspect_ratio` | no | `9:16` (default), `16:9`, `1:1` |
 | `seed` | no | int |
-| `resolution_preset` / `quality` | no | `draft` (544×960), `720p` (704×1248, 0.88 MP), `native` (768×1344) for 9:16 |
+| `resolution_preset` / `quality` | no | `draft` (544×960), `720p` (720×1280), `native` (768×1344) for 9:16 |
 | `upscale` | no | default `true` → 1080×1920 for 9:16 |
 | `num_inference_steps` | no | default `20` |
 | `image` / `first_frame` | for I2VA | Local path or HTTP(S) URL for the first keyframe |
