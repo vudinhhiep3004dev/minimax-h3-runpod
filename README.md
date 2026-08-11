@@ -70,7 +70,7 @@ python -u handler.py  # picks up test_input.json when RUNPOD_LOCAL_TEST patterns
 | `prompt` | yes | H3-style shot/audio description recommended |
 | `workflow` / `mode` | no | `t2va`, `i2va`, `l2va`, `fl2va`, or `ref2va`; omitted mode is inferred from media |
 | `duration` | no | 4–15s; snapped to H3 `17n+5` frames @ 24fps |
-| `aspect_ratio` | no | `9:16` (default), `16:9`, `1:1` |
+| `aspect_ratio` | no | `9:16` (default), `16:9`, `4:3`, `1:1` |
 | `seed` | no | int |
 | `resolution_preset` / `quality` | no | `draft` (544×960), `720p` (720×1280), `native` (768×1344) for 9:16 |
 | `upscale` | no | default `true` → 1080×1920 for 9:16 |

@@ -59,6 +59,12 @@ ASPECT_SIZES: dict[str, dict[str, dict[str, int]]] = {
         "720p": {"width": 1280, "height": 720},
         "native": {"width": 1344, "height": 768},
     },
+    "4:3": {
+        # Closely matches the supplied poster while preserving the full layout.
+        "draft": {"width": 768, "height": 576},
+        "720p": {"width": 1024, "height": 768},
+        "native": {"width": 1152, "height": 864},
+    },
     "1:1": {
         "draft": {"width": 704, "height": 704},
         "720p": {"width": 768, "height": 768},
