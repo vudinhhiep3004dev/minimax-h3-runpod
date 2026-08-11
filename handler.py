@@ -1,4 +1,4 @@
-"""Runpod Serverless handler for MiniMax H3 text-to-video-and-audio."""
+"""Runpod Serverless handler for MiniMax H3 video + audio workflows."""
 
 from __future__ import annotations
 
@@ -10,14 +10,15 @@ from typing import Any
 
 import runpod
 
+import h3_pipeline
 from cost import compute_cost, format_cli_summary
 from h3_pipeline import (
-    MODEL_INIT_SECONDS,
-    MODEL_LOADED,
     PipelineError,
     detect_gpu_name,
     generate,
+    is_model_loaded,
     load_pipeline,
+    normalize_workflow,
 )
 from upload import UploadError, upload_video
 from upscale import UpscaleError, upscale_to_tiktok
@@ -67,6 +68,40 @@ def _as_bool(value: Any, default: bool) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _first_value(raw: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        value = raw.get(name)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _normalize_references(value: Any) -> list[Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value:
+        raise ValueError("references must be a non-empty list")
+    normalized: list[Any] = []
+    for index, item in enumerate(value):
+        if isinstance(item, (str, os.PathLike)):
+            if not str(item).strip():
+                raise ValueError(f"references[{index}] must not be empty")
+            normalized.append({"type": "image", "url": str(item).strip()})
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f"references[{index}] must be a URL/path or object")
+        source = item.get("url") or item.get("uri") or item.get("path")
+        if source is None or not str(source).strip():
+            raise ValueError(f"references[{index}] needs url, uri, or path")
+        copy = dict(item)
+        copy["url"] = str(source).strip()
+        normalized.append(copy)
+    return normalized
+
+
 def _validate_and_normalize(job_input: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(job_input, dict):
         raise ValueError("input must be a JSON object")
@@ -109,8 +144,62 @@ def _normalize_one(raw: dict[str, Any], index: int | None = None) -> dict[str, A
         if steps < 4 or steps > 50:
             raise ValueError("num_inference_steps must be between 4 and 50")
 
+    image = _first_value(raw, "image", "image_url", "first_frame", "first_frame_url")
+    last_image = _first_value(raw, "last_image", "last_image_url", "last_frame", "last_frame_url")
+    references = _normalize_references(raw.get("references"))
+
+    requested = raw.get("workflow") or raw.get("mode")
+    requested_text = str(requested).strip().lower() if requested is not None else ""
+    has_keyframes = image is not None or last_image is not None
+    has_references = references is not None
+
+    if not requested_text:
+        if has_references:
+            workflow = "ref2va"
+        elif has_keyframes:
+            workflow = "fl2va"
+        else:
+            workflow = "t2va"
+    else:
+        workflow = normalize_workflow(requested_text)
+
+    if workflow == "t2va" and (has_keyframes or has_references):
+        raise ValueError("t2va cannot be combined with image, last_image, or references")
+    if workflow == "fl2va":
+        if has_references:
+            raise ValueError("fl2va accepts image/last_image, not references")
+        if not has_keyframes:
+            raise ValueError("fl2va requires image, last_image, or both")
+        if requested_text in {"i2v", "i2va"} and image is None:
+            raise ValueError("i2va requires image/first_frame")
+        if requested_text in {"l2v", "l2va"} and last_image is None:
+            raise ValueError("l2va requires last_image/last_frame")
+    if workflow == "ref2va":
+        if has_keyframes:
+            raise ValueError("ref2va accepts references, not image/last_image")
+        if not has_references:
+            raise ValueError("ref2va requires references")
+
+    if requested_text in {"i2v", "i2va"}:
+        mode = "i2va"
+    elif requested_text in {"l2v", "l2va"}:
+        mode = "l2va"
+    elif workflow == "fl2va" and image is not None and last_image is not None:
+        mode = "fl2va"
+    elif workflow == "fl2va" and image is not None:
+        mode = "i2va"
+    elif workflow == "fl2va":
+        mode = "l2va"
+    else:
+        mode = workflow
+
     return {
         "prompt": str(prompt).strip(),
+        "workflow": workflow,
+        "mode": mode,
+        "image": image,
+        "last_image": last_image,
+        "references": references,
         "duration": duration,
         "aspect_ratio": aspect_ratio,
         "resolution_preset": preset,
@@ -126,11 +215,15 @@ def _run_one(spec: dict[str, Any], *, worker_cold: bool, model_init_seconds: flo
 
     gen = generate(
         prompt=spec["prompt"],
+        workflow=spec["workflow"],
         duration=spec["duration"],
         aspect_ratio=spec["aspect_ratio"],
         resolution_preset=spec["resolution_preset"],
         seed=spec["seed"],
         num_inference_steps=spec["num_inference_steps"],
+        image=spec["image"],
+        last_image=spec["last_image"],
+        references=spec["references"],
     )
 
     native_w, native_h = gen.width, gen.height
@@ -180,6 +273,9 @@ def _run_one(spec: dict[str, Any], *, worker_cold: bool, model_init_seconds: flo
 
     return {
         "video_url": uploaded["video_url"],
+        "workflow": gen.workflow,
+        "mode": spec["mode"],
+        "reference_count": len(spec["references"] or []),
         "duration": gen.duration,
         "width": out_w,
         "height": out_h,
@@ -213,9 +309,10 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         specs = _validate_and_normalize(job_input)
 
         worker_cold = _FIRST_REQUEST
-        if not MODEL_LOADED:
-            load_pipeline()
-            _MODEL_INIT_AT_LOAD = MODEL_INIT_SECONDS
+        first_workflow = specs[0]["workflow"]
+        if not is_model_loaded(first_workflow):
+            load_pipeline(first_workflow)
+            _MODEL_INIT_AT_LOAD = h3_pipeline.MODEL_INIT_SECONDS
         model_init = _MODEL_INIT_AT_LOAD if worker_cold else 0.0
 
         results = []
@@ -271,10 +368,11 @@ def _start_background_eager_load() -> None:
         global _MODEL_INIT_AT_LOAD
         try:
             print("[handler] background eager model load starting", flush=True)
-            load_pipeline()
-            _MODEL_INIT_AT_LOAD = MODEL_INIT_SECONDS
+            workflow = normalize_workflow(os.environ.get("H3_WORKFLOW", "t2va"))
+            load_pipeline(workflow)
+            _MODEL_INIT_AT_LOAD = h3_pipeline.MODEL_INIT_SECONDS
             print(
-                f"[handler] background eager model load done ({MODEL_INIT_SECONDS:.1f}s)",
+                f"[handler] background eager model load done ({h3_pipeline.MODEL_INIT_SECONDS:.1f}s)",
                 flush=True,
             )
         except Exception as exc:  # noqa: BLE001

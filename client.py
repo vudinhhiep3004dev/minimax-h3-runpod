@@ -107,11 +107,40 @@ def print_result(result: dict[str, Any]) -> int:
     return 0 if not (isinstance(output, dict) and output.get("error")) else 1
 
 
+def _parse_reference_arg(value: str) -> dict[str, str]:
+    """Parse ``TYPE=URL`` (or a small JSON object) for the CLI."""
+    value = value.strip()
+    if value.startswith("{"):
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict):
+            raise ValueError("reference JSON must be an object")
+        return parsed
+    if "=" in value:
+        kind, source = value.split("=", 1)
+    elif ":" in value:
+        kind, source = value.split(":", 1)
+    else:
+        kind, source = "image", value
+    if not kind.strip() or not source.strip():
+        raise ValueError("reference must be TYPE=URL (or just an image URL)")
+    return {"type": kind.strip(), "url": source.strip()}
+
+
 def main() -> int:
     _load_dotenv()
     parser = argparse.ArgumentParser(description="MiniMax H3 Runpod client")
     parser.add_argument("--prompt", default=None)
     parser.add_argument("--input", type=Path, default=Path("test_input.json"))
+    parser.add_argument("--workflow", default=None, help="t2va|i2va|l2va|fl2va|ref2va")
+    parser.add_argument("--image", default=None, help="first-frame image URL/path")
+    parser.add_argument("--last-image", default=None, help="last-frame image URL/path")
+    parser.add_argument(
+        "--reference",
+        action="append",
+        default=[],
+        metavar="TYPE=URL",
+        help="ref2va reference; repeat for image/video/audio",
+    )
     parser.add_argument("--duration", type=float, default=None)
     parser.add_argument("--aspect-ratio", default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -133,6 +162,18 @@ def main() -> int:
 
     if args.prompt:
         job_input["prompt"] = args.prompt
+    if args.workflow:
+        job_input["workflow"] = args.workflow
+    if args.image:
+        job_input["image"] = args.image
+    if args.last_image:
+        job_input["last_image"] = args.last_image
+    if args.reference:
+        try:
+            job_input["references"] = [_parse_reference_arg(value) for value in args.reference]
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            print(f"invalid --reference: {exc}", file=sys.stderr)
+            return 2
     if args.duration is not None:
         job_input["duration"] = args.duration
     if args.aspect_ratio:

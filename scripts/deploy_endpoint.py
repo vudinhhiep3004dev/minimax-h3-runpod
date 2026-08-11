@@ -82,6 +82,7 @@ def main() -> int:
             "H3_MEMORY_MODE": os.environ.get("H3_MEMORY_MODE", "auto"),
             "H3_EAGER_LOAD": "1",
             "H3_DEFAULT_PRESET": os.environ.get("H3_DEFAULT_PRESET", "draft"),
+            "H3_WORKFLOW": os.environ.get("H3_WORKFLOW", "t2va"),
             "H3_NUM_INFERENCE_STEPS": os.environ.get("H3_NUM_INFERENCE_STEPS", "20"),
             "RUNPOD_GPU_TYPE": os.environ.get("RUNPOD_GPU_TYPE", "L40S"),
             "RUNPOD_GPU_RATE_PER_SEC": os.environ.get("RUNPOD_GPU_RATE_PER_SEC", "0.00053"),

@@ -7,8 +7,8 @@ Submit an ad-hoc prompt, get a durable MP4 URL (TikTok 1080×1920 by default), w
 ## Architecture
 
 - Python 3.10+ / `runpod` SDK / `handler.py`
-- Official **diffusers ModularPipeline** `workflow="t2va"` (FL2VA text-to-video+audio)
-- Model loaded **once per worker lifecycle** (eager load at process start)
+- Official **diffusers ModularPipeline** with `t2va`, `fl2va`, and `ref2va` workflows
+- One workflow loaded per worker lifecycle; switching partitions is lazy and can be avoided with dedicated endpoints
 - Flex workers, **scale-to-zero**, Queue endpoint
 - Burst = many independent `/run` jobs sharing a warm worker (native queue)
 - Outputs uploaded to S3-compatible storage (or local `file://` for tests)
@@ -55,6 +55,7 @@ python -u handler.py  # picks up test_input.json when RUNPOD_LOCAL_TEST patterns
 {
   "input": {
     "prompt": "...",
+    "workflow": "t2va",
     "duration": 10,
     "aspect_ratio": "9:16",
     "seed": 123,
@@ -67,13 +68,79 @@ python -u handler.py  # picks up test_input.json when RUNPOD_LOCAL_TEST patterns
 | Field | Required | Notes |
 |---|---|---|
 | `prompt` | yes | H3-style shot/audio description recommended |
+| `workflow` / `mode` | no | `t2va`, `i2va`, `l2va`, `fl2va`, or `ref2va`; omitted mode is inferred from media |
 | `duration` | no | 4–15s; snapped to H3 `17n+5` frames @ 24fps |
 | `aspect_ratio` | no | `9:16` (default), `16:9`, `1:1` |
 | `seed` | no | int |
 | `resolution_preset` / `quality` | no | `draft` (544×960), `720p` (720×1280), `native` (768×1344) for 9:16 |
 | `upscale` | no | default `true` → 1080×1920 for 9:16 |
 | `num_inference_steps` | no | default `20` |
+| `image` / `first_frame` | for I2VA | Local path or HTTP(S) URL for the first keyframe |
+| `last_image` / `last_frame` | for L2VA/FL2VA | Local path or HTTP(S) URL for the last keyframe |
+| `references` | for Ref2VA | Ordered list of `{type: image|video|audio, url|path}`; max 9 images, 3 videos, 3 audio, 12 total |
 | `jobs` | no | optional list of the above; runs sequentially on one warm worker |
+
+### Image-to-video and reference-to-video examples
+
+MiniMax H3 calls the first/last-keyframe family `fl2va`.  One `image` is
+first-frame image-to-video (I2VA), one `last_image` is last-frame-to-video
+(L2VA), and both images form first-and-last-frame video.  `ref2va` is different:
+its ordered references describe subjects, motion, style, or audio; they do not
+pin the generated first/last frame.
+
+```json
+{
+  "input": {
+    "workflow": "i2va",
+    "prompt": "The product rotates slowly, soft studio light, subtle whoosh.",
+    "image": "https://example.com/product.png",
+    "duration": 8,
+    "resolution_preset": "draft"
+  }
+}
+```
+
+```json
+{
+  "input": {
+    "workflow": "ref2va",
+    "prompt": "Keep the character identity and outfit from <Picture 1>; use the camera motion from <Video 1>.",
+    "references": [
+      {"type": "image", "url": "https://example.com/character.png"},
+      {"type": "video", "url": "https://example.com/motion.mp4"}
+    ],
+    "duration": 8,
+    "resolution_preset": "draft"
+  }
+}
+```
+
+Use URLs (or paths already visible inside the worker), not base64 media in the
+Runpod JSON request.  The worker decodes URLs with the official H3 reference
+classes so video frame rates and audio sample rates are retained.
+
+### MCP gateway
+
+`mcp_server.py` is a small local MCP gateway.  It keeps Runpod credentials off
+the GPU worker, accepts URL or local-path media, uploads local media to the
+configured S3/R2 bucket, submits the queue job, and returns the durable MP4
+URL.  Install its separate dependencies so the GPU image does not gain an MCP
+server:
+
+```bash
+python -m venv .venv-mcp
+source .venv-mcp/bin/activate
+pip install -r mcp_requirements.txt
+export RUNPOD_API_KEY=rpa_...
+export RUNPOD_ENDPOINT_ID=...
+python mcp_server.py
+```
+
+The MCP exposes `h3_generate_video`, `h3_job_status`, and `h3_cancel_job`.
+For a larger deployment, set `RUNPOD_ENDPOINT_ID_T2VA`,
+`RUNPOD_ENDPOINT_ID_FL2VA`, and `RUNPOD_ENDPOINT_ID_REF2VA`; the gateway will
+route each workflow to its own endpoint and avoid repeatedly swapping the two
+large transformer partitions.
 
 ## Build the worker image (remote — do not upload from your laptop)
 
@@ -130,6 +197,12 @@ Prefer `python scripts/deploy_stable_endpoint.py` which creates:
 **Do not** attach a Runpod console “cached model” to this endpoint; use the network volume + `HF_TOKEN` instead.
 
 Current stable endpoint ID is in `.env` as `RUNPOD_ENDPOINT_ID` (recreated if the previous one was deleted).
+
+The default 200GB volume is sized for the shared components plus the `t2va` /
+`fl2va` transformer. `ref2va` uses a separate `transformer_ref` partition;
+running both families on the same cache can exceed 200GB. For Ref2VA, use a
+separate endpoint/volume (or increase the volume after checking the current
+checkpoint sizes) and set `RUNPOD_ENDPOINT_ID_REF2VA` in the MCP gateway.
 ## Exact Runpod endpoint configuration
 
 Console: [Serverless → New Endpoint → Docker](https://www.console.runpod.io/serverless)
@@ -166,6 +239,7 @@ Copy from `.env.example`. Minimum:
 | `S3_PUBLIC_BASE_URL` | optional CDN base |
 | `H3_EAGER_LOAD` | `1` |
 | `H3_DEFAULT_PRESET` | `draft` for cheapest TikToks |
+| `H3_WORKFLOW` | optional warm-start workflow; `t2va` by default |
 
 After deploy, set locally:
 
@@ -232,6 +306,8 @@ cost.py             $/sec math
 upload.py           S3-compatible upload
 upscale.py          → 1080×1920 + audio
 client.py           single job CLI
+mcp_server.py       local MCP gateway
+mcp_requirements.txt MCP-only dependencies
 burst.py            N independent jobs
 benchmark.py        economics suite
 Dockerfile

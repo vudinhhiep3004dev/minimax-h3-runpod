@@ -99,6 +99,7 @@ def main() -> int:
         "H3_DEFAULT_PRESET": "draft",
         "H3_NUM_INFERENCE_STEPS": "20",
         "H3_MODEL_ID": "MiniMaxAI/MiniMax-H3",
+        "H3_WORKFLOW": os.environ.get("H3_WORKFLOW", "t2va"),
         "RUNPOD_GPU_TYPE": "A100",
         "RUNPOD_GPU_RATE_PER_SEC": os.environ.get("RUNPOD_GPU_RATE_PER_SEC", "0.00076"),
         "MINIMAX_RATE_PER_SEC": "0.13",
