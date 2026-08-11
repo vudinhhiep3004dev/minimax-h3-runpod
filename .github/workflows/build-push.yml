@@ -25,10 +25,10 @@ permissions:
   packages: write
 
 env:
-  GHCR_IMAGE: ghcr.io/ruizmr/minimax-h3-runpod
+  GHCR_IMAGE: ghcr.io/vudinhhiep3004dev/minimax-h3-runpod
   # Public anonymous registry so Runpod can pull without GHCR auth.
   # 7-day TTL; re-run this workflow to refresh.
-  PUBLIC_IMAGE: ttl.sh/ruizmr-minimax-h3-runpod:7d
+  PUBLIC_IMAGE: ttl.sh/vudinhhiep3004dev-minimax-h3-runpod:7d
 
 jobs:
   build:
